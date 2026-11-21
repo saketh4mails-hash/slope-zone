@@ -19,6 +19,11 @@ h1{font-size:clamp(25px,4vw,36px);margin:0 0 5px}.sub{margin:0;color:#9db5a5;fon
 .stat small{display:block;color:#8eaa98;font-size:10px;text-transform:uppercase;letter-spacing:1px}.stat strong{display:block;font-size:20px;color:var(--green);margin-top:2px}
 .gamebox{position:relative;border:1px solid #245b37;border-radius:14px;overflow:hidden;background:#020403;box-shadow:0 0 36px #38ff7915}
 canvas{display:block;width:100%;height:auto;aspect-ratio:16/9;touch-action:none}
+.fullscreen-btn{position:absolute;z-index:5;top:12px;right:12px;padding:9px 13px;font-size:12px;background:#0b1b11;color:#48ff91;border:1px solid #2a6540;border-radius:8px}
+.gamebox:fullscreen{width:100vw;height:100vh;border:0;border-radius:0;display:flex;flex-direction:column;background:#020403;box-shadow:none}
+.gamebox:fullscreen canvas{width:100%;height:100%;flex:1;min-height:0;aspect-ratio:auto;object-fit:fill}
+.gamebox:fullscreen .hud{top:18px}
+.gamebox:fullscreen .fullscreen-btn{top:14px;right:14px}
 .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#020704b8;text-align:center;padding:20px}
 .panel{max-width:390px;background:#09140deF;border:1px solid #2a6540;border-radius:15px;padding:25px 28px;box-shadow:0 12px 50px #0009}
 .panel h2{margin:0 0 8px;font-size:29px}.panel p{color:#a9c2b0;line-height:1.5;margin:0 0 18px}
@@ -42,8 +47,9 @@ footer{text-align:center;color:#617a68;font-size:12px;padding:16px}
       <div class="stat"><small>Speed</small><strong id="speed">1.0×</strong></div>
     </div>
   </div>
-  <div class="gamebox">
+  <div class="gamebox" id="gamebox">
     <canvas id="game" width="960" height="540" aria-label="Neon Run game area"></canvas>
+    <button id="fullscreenBtn" class="fullscreen-btn" type="button" aria-label="Enter fullscreen">FULLSCREEN ⛶</button>
     <div class="hud"><span>◀ / ▶ OR A / D TO STEER</span><span>AVOID THE RED BLOCKS</span></div>
     <div class="overlay" id="overlay">
       <div class="panel"><h2 id="panelTitle">Ready to roll?</h2><p id="panelText">Steer left and right to stay on the neon track. The longer you survive, the faster it gets.</p><button id="start">PLAY NOW</button></div>
@@ -55,152 +61,369 @@ footer{text-align:center;color:#617a68;font-size:12px;padding:16px}
 <script>
 (() => {
  const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+ const gamebox=document.getElementById('gamebox');
+ const fullscreenBtn=document.getElementById('fullscreenBtn');
  const W=960,H=540,horizon=105;
+
+ async function toggleFullscreen(){
+   try{
+     if(document.fullscreenElement){
+       await document.exitFullscreen();
+     }
+     else if(gamebox.requestFullscreen){
+       await gamebox.requestFullscreen();
+     }
+     else{
+       alert('Fullscreen is not supported in this browser.');
+     }
+   }catch(error){
+     alert('Fullscreen was blocked by the embedded Google Sites frame. Try opening the game directly in a new tab, then press FULLSCREEN.');
+   }
+ }
+
+ fullscreenBtn.addEventListener('click',toggleFullscreen);
+
+ document.addEventListener('fullscreenchange',()=>{
+   const active=document.fullscreenElement===gamebox;
+   fullscreenBtn.textContent=active?'EXIT FULLSCREEN':'FULLSCREEN ⛶';
+   fullscreenBtn.setAttribute('aria-label',active?'Exit fullscreen':'Enter fullscreen');
+ });
+
  const scoreEl=document.getElementById('score'),bestEl=document.getElementById('best'),speedEl=document.getElementById('speed');
  const overlay=document.getElementById('overlay'),titleEl=document.getElementById('panelTitle'),textEl=document.getElementById('panelText'),startBtn=document.getElementById('start');
+
  let state='ready',player=0,target=0,distance=0,score=0,speed=25,last=0,spawnAt=32,obstacles=[],stripeOffset=0,curve=0,curveTarget=0,ballSpin=0,particles=[];
- let best=0; try{best=Number(localStorage.getItem('slopeZoneBest')||0)}catch(e){}
+ let best=0;
+ try{best=Number(localStorage.getItem('slopeZoneBest')||0)}catch(e){}
  bestEl.textContent=best;
+
  const keys={};
+
  function project(x,z){
    const p=1.9/(z+1.9);
    const bend=curve*(1-p)*150;
    const half=W*.43*p;
    return {x:W/2+x*half+bend,y:horizon+p*(H-horizon),p,half};
  }
+
  function roundedRect(x,y,w,h,r,fill,stroke){
    ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fillStyle=fill;ctx.fill();
    if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=2;ctx.stroke()}
  }
+
  function drawBackground(){
-   const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#020504');g.addColorStop(1,'#07140c');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
-   for(let i=0;i<45;i++){let x=(i*197)%W,y=(i*83)%horizon;ctx.fillStyle=`rgba(92,255,145,${.12+(i%4)*.04})`;ctx.fillRect(x,y,2,2)}
-   ctx.fillStyle='#0b1a10';ctx.beginPath();ctx.moveTo(W/2-W*.43,horizon);ctx.lineTo(W/2+W*.43,horizon);ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.closePath();ctx.fill();
+   const g=ctx.createLinearGradient(0,0,0,H);
+   g.addColorStop(0,'#020504');
+   g.addColorStop(1,'#07140c');
+   ctx.fillStyle=g;
+   ctx.fillRect(0,0,W,H);
+
+   for(let i=0;i<45;i++){
+     let x=(i*197)%W,y=(i*83)%horizon;
+     ctx.fillStyle=`rgba(92,255,145,${.12+(i%4)*.04})`;
+     ctx.fillRect(x,y,2,2);
+   }
+
+   ctx.fillStyle='#0b1a10';
+   ctx.beginPath();
+   ctx.moveTo(W/2-W*.43,horizon);
+   ctx.lineTo(W/2+W*.43,horizon);
+   ctx.lineTo(W,H);
+   ctx.lineTo(0,H);
+   ctx.closePath();
+   ctx.fill();
  }
+
  function drawTrack(){
-   // A continuous tapered 3D runway with moving transverse seams.
    for(let z=94;z>=0;z-=2){
      const z0=z+(stripeOffset%2),z1=z0+2;
      const a=project(-1,z0),b=project(1,z0),c=project(1,z1),d=project(-1,z1);
-     ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.lineTo(c.x,c.y);ctx.lineTo(d.x,d.y);ctx.closePath();
-     ctx.fillStyle=(Math.floor((z+stripeOffset)/7)%2===0)?'#101b15':'#0a130e';ctx.fill();
+
+     ctx.beginPath();
+     ctx.moveTo(a.x,a.y);
+     ctx.lineTo(b.x,b.y);
+     ctx.lineTo(c.x,c.y);
+     ctx.lineTo(d.x,d.y);
+     ctx.closePath();
+
+     ctx.fillStyle=(Math.floor((z+stripeOffset)/7)%2===0)?'#101b15':'#0a130e';
+     ctx.fill();
+
      if(Math.floor((z+stripeOffset)/7)%2===0){
-       ctx.strokeStyle=`rgba(65,255,132,${.06+a.p*.16})`;ctx.lineWidth=Math.max(.6,2.2*a.p);
-       ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+       ctx.strokeStyle=`rgba(65,255,132,${.06+a.p*.16})`;
+       ctx.lineWidth=Math.max(.6,2.2*a.p);
+       ctx.beginPath();
+       ctx.moveTo(a.x,a.y);
+       ctx.lineTo(b.x,b.y);
+       ctx.stroke();
      }
    }
-   // Bright edge strips and subtle outer guide rails.
+
    for(const side of [-1,1]){
      const p1=project(side,0),p2=project(side,94);
-     ctx.strokeStyle='#48ff91';ctx.lineWidth=5;ctx.shadowColor='#35ff80';ctx.shadowBlur=20;
-     ctx.beginPath();ctx.moveTo(p1.x,p1.y);ctx.lineTo(p2.x,p2.y);ctx.stroke();ctx.shadowBlur=0;
+     ctx.strokeStyle='#48ff91';
+     ctx.lineWidth=5;
+     ctx.shadowColor='#35ff80';
+     ctx.shadowBlur=20;
+     ctx.beginPath();
+     ctx.moveTo(p1.x,p1.y);
+     ctx.lineTo(p2.x,p2.y);
+     ctx.stroke();
+     ctx.shadowBlur=0;
+
      const q1=project(side*1.08,0),q2=project(side*1.08,94);
-     ctx.strokeStyle='#245d38';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(q1.x,q1.y);ctx.lineTo(q2.x,q2.y);ctx.stroke();
+     ctx.strokeStyle='#245d38';
+     ctx.lineWidth=2;
+     ctx.beginPath();
+     ctx.moveTo(q1.x,q1.y);
+     ctx.lineTo(q2.x,q2.y);
+     ctx.stroke();
    }
-   // Sparse center guide marks reinforce the downhill depth.
+
    for(let z=4;z<86;z+=10){
      const a=project(0,z+stripeOffset%10),b=project(0,z+4+stripeOffset%10);
-     ctx.strokeStyle=`rgba(91,255,148,${.12+a.p*.35})`;ctx.lineWidth=Math.max(1,3.5*a.p);
-     ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+     ctx.strokeStyle=`rgba(91,255,148,${.12+a.p*.35})`;
+     ctx.lineWidth=Math.max(1,3.5*a.p);
+     ctx.beginPath();
+     ctx.moveTo(a.x,a.y);
+     ctx.lineTo(b.x,b.y);
+     ctx.stroke();
    }
  }
+
  function drawObstacle(o){
    const p=project(o.x,o.z),w=W*.12*p.p,h=H*.145*p.p,depth=w*.22;
    const x=p.x-w/2,y=p.y-h;
-   ctx.shadowColor='#ff263f';ctx.shadowBlur=18;
-   // top face
-   ctx.fillStyle='#ff6874';ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+depth,y-depth*.72);ctx.lineTo(x+w+depth,y-depth*.72);ctx.lineTo(x+w,y);ctx.closePath();ctx.fill();
-   // right face
-   ctx.fillStyle='#a90d25';ctx.beginPath();ctx.moveTo(x+w,y);ctx.lineTo(x+w+depth,y-depth*.72);ctx.lineTo(x+w+depth,y+h-depth*.72);ctx.lineTo(x+w,y+h);ctx.closePath();ctx.fill();
-   // front face
-   const face=ctx.createLinearGradient(x,y,x+w,y+h);face.addColorStop(0,'#ff354d');face.addColorStop(1,'#c70d2c');
-   ctx.fillStyle=face;ctx.fillRect(x,y,w,h);
-   ctx.strokeStyle='#ff9ca7';ctx.lineWidth=Math.max(1,p.p*2);ctx.strokeRect(x,y,w,h);
+   ctx.shadowColor='#ff263f';
+   ctx.shadowBlur=18;
+
+   ctx.fillStyle='#ff6874';
+   ctx.beginPath();
+   ctx.moveTo(x,y);
+   ctx.lineTo(x+depth,y-depth*.72);
+   ctx.lineTo(x+w+depth,y-depth*.72);
+   ctx.lineTo(x+w,y);
+   ctx.closePath();
+   ctx.fill();
+
+   ctx.fillStyle='#a90d25';
+   ctx.beginPath();
+   ctx.moveTo(x+w,y);
+   ctx.lineTo(x+w+depth,y-depth*.72);
+   ctx.lineTo(x+w+depth,y+h-depth*.72);
+   ctx.lineTo(x+w,y+h);
+   ctx.closePath();
+   ctx.fill();
+
+   const face=ctx.createLinearGradient(x,y,x+w,y+h);
+   face.addColorStop(0,'#ff354d');
+   face.addColorStop(1,'#c70d2c');
+   ctx.fillStyle=face;
+   ctx.fillRect(x,y,w,h);
+
+   ctx.strokeStyle='#ff9ca7';
+   ctx.lineWidth=Math.max(1,p.p*2);
+   ctx.strokeRect(x,y,w,h);
    ctx.shadowBlur=0;
  }
+
  function drawBall(){
    const p=project(player,1.35),r=29;
-   // Soft ground shadow
-   ctx.save();ctx.globalAlpha=.55;ctx.fillStyle='#000';ctx.beginPath();ctx.ellipse(p.x,p.y-3,35,9,0,0,Math.PI*2);ctx.fill();ctx.restore();
-   ctx.save();ctx.translate(p.x,p.y-31);ctx.rotate(ballSpin);
-   ctx.shadowColor='#4dff92';ctx.shadowBlur=28;
+
+   ctx.save();
+   ctx.globalAlpha=.55;
+   ctx.fillStyle='#000';
+   ctx.beginPath();
+   ctx.ellipse(p.x,p.y-3,35,9,0,0,Math.PI*2);
+   ctx.fill();
+   ctx.restore();
+
+   ctx.save();
+   ctx.translate(p.x,p.y-31);
+   ctx.rotate(ballSpin);
+   ctx.shadowColor='#4dff92';
+   ctx.shadowBlur=28;
+
    const grad=ctx.createRadialGradient(-11,-13,2,0,0,r);
-   grad.addColorStop(0,'#f0fff4');grad.addColorStop(.2,'#9dffb8');grad.addColorStop(.62,'#38df78');grad.addColorStop(1,'#087638');
-   ctx.fillStyle=grad;ctx.beginPath();ctx.arc(0,0,r,0,Math.PI*2);ctx.fill();
-   ctx.shadowBlur=0;ctx.strokeStyle='#caffd7';ctx.lineWidth=2;ctx.stroke();
-   // Curved seams make the ball visibly roll
-   ctx.strokeStyle='rgba(2,75,33,.65)';ctx.lineWidth=3;
-   ctx.beginPath();ctx.ellipse(0,0,10,28,.45,0,Math.PI*2);ctx.stroke();
-   ctx.beginPath();ctx.ellipse(0,0,28,10,-.35,0,Math.PI*2);ctx.stroke();
+   grad.addColorStop(0,'#f0fff4');
+   grad.addColorStop(.2,'#9dffb8');
+   grad.addColorStop(.62,'#38df78');
+   grad.addColorStop(1,'#087638');
+
+   ctx.fillStyle=grad;
+   ctx.beginPath();
+   ctx.arc(0,0,r,0,Math.PI*2);
+   ctx.fill();
+
+   ctx.shadowBlur=0;
+   ctx.strokeStyle='#caffd7';
+   ctx.lineWidth=2;
+   ctx.stroke();
+
+   ctx.strokeStyle='rgba(2,75,33,.65)';
+   ctx.lineWidth=3;
+   ctx.beginPath();
+   ctx.ellipse(0,0,10,28,.45,0,Math.PI*2);
+   ctx.stroke();
+
+   ctx.beginPath();
+   ctx.ellipse(0,0,28,10,-.35,0,Math.PI*2);
+   ctx.stroke();
    ctx.restore();
  }
+
  function draw(){
    drawBackground();
-   // Tiny speed streaks at the edges intensify as the run gets faster.
+
    if(state==='playing'){
-     ctx.strokeStyle='rgba(73,255,143,.18)';ctx.lineWidth=1;
-     for(let i=0;i<10;i++){const x=(i*113+Math.floor(distance*13)%W)%W;const y=(i*71+Math.floor(distance*31)%(H-horizon))+horizon;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x-5,y+18+speed*.25);ctx.stroke()}
+     ctx.strokeStyle='rgba(73,255,143,.18)';
+     ctx.lineWidth=1;
+     for(let i=0;i<10;i++){
+       const x=(i*113+Math.floor(distance*13)%W)%W;
+       const y=(i*71+Math.floor(distance*31)%(H-horizon))+horizon;
+       ctx.beginPath();
+       ctx.moveTo(x,y);
+       ctx.lineTo(x-5,y+18+speed*.25);
+       ctx.stroke();
+     }
    }
+
    drawTrack();
    [...obstacles].sort((a,b)=>b.z-a.z).forEach(drawObstacle);
    drawBall();
-   const v=ctx.createRadialGradient(W/2,H*.65,100,W/2,H*.65,600);v.addColorStop(.5,'transparent');v.addColorStop(1,'#0009');ctx.fillStyle=v;ctx.fillRect(0,0,W,H);
+
+   const v=ctx.createRadialGradient(W/2,H*.65,100,W/2,H*.65,600);
+   v.addColorStop(.5,'transparent');
+   v.addColorStop(1,'#0009');
+   ctx.fillStyle=v;
+   ctx.fillRect(0,0,W,H);
  }
+
  function update(dt){
    if(state!=='playing')return;
+
    const steer=(keys.ArrowLeft||keys.a||keys.A?-1:0)+(keys.ArrowRight||keys.d||keys.D?1:0);
+
    if(steer)target+=steer*dt*2.5;
    target=Math.max(-.88,Math.min(.88,target));
    player+=(target-player)*Math.min(1,dt*8);
+
    speed=Math.min(58,25+score*.052);
-   distance+=speed*dt;score=Math.floor(distance);
+   distance+=speed*dt;
+   score=Math.floor(distance);
    stripeOffset=(stripeOffset+speed*dt*1.7)%14;
    ballSpin-=steer*dt*2.8+speed*dt*.025;
-   // The road gently bends left and right as the run progresses.
+
    if(distance>spawnAt-18){curveTarget=(Math.random()-.5)*.55}
    curve+=(curveTarget-curve)*Math.min(1,dt*.65);
+
    for(const o of obstacles)o.z-=speed*dt;
    obstacles=obstacles.filter(o=>o.z>-.5);
+
    if(distance>=spawnAt){
      const lanes=[-.68,0,.68],lane=lanes[Math.floor(Math.random()*3)];
      obstacles.push({x:lane,z:82});
-     if(score>160&&Math.random()<.32){const choices=lanes.filter(v=>v!==lane);obstacles.push({x:choices[Math.floor(Math.random()*choices.length)],z:96})}
+
+     if(score>160&&Math.random()<.32){
+       const choices=lanes.filter(v=>v!==lane);
+       obstacles.push({x:choices[Math.floor(Math.random()*choices.length)],z:96});
+     }
+
      spawnAt+=20+Math.random()*8;
    }
+
    for(const o of obstacles){
-     if(o.z<2.8&&o.z>-.3&&Math.abs(player-o.x)<.29){endGame();break}
+     if(o.z<2.8&&o.z>-.3&&Math.abs(player-o.x)<.29){
+       endGame();
+       break;
+     }
    }
+
    if(Math.abs(player)>.99)endGame();
-   scoreEl.textContent=score;speedEl.textContent=(speed/25).toFixed(1)+'×';
+
+   scoreEl.textContent=score;
+   speedEl.textContent=(speed/25).toFixed(1)+'×';
  }
+
  function endGame(){
    state='over';
-   if(score>best){best=score;bestEl.textContent=best;try{localStorage.setItem('slopeZoneBest',best)}catch(e){}}
+
+   if(score>best){
+     best=score;
+     bestEl.textContent=best;
+     try{localStorage.setItem('slopeZoneBest',best)}catch(e){}
+   }
+
    titleEl.textContent='Run over!';
    textEl.textContent='You scored '+score+'. Ready for another run?';
-   startBtn.textContent='PLAY AGAIN';overlay.style.display='flex';
+   startBtn.textContent='PLAY AGAIN';
+   overlay.style.display='flex';
  }
+
  function startGame(){
-   player=0;target=0;distance=0;score=0;speed=25;spawnAt=26;obstacles=[];stripeOffset=0;curve=0;curveTarget=0;ballSpin=0;
-   scoreEl.textContent='0';speedEl.textContent='1.0×';state='playing';overlay.style.display='none';
+   player=0;
+   target=0;
+   distance=0;
+   score=0;
+   speed=25;
+   spawnAt=26;
+   obstacles=[];
+   stripeOffset=0;
+   curve=0;
+   curveTarget=0;
+   ballSpin=0;
+   scoreEl.textContent='0';
+   speedEl.textContent='1.0×';
+   state='playing';
+   overlay.style.display='none';
  }
+
  let lastTime=0;
- function loop(t){const dt=Math.min(.04,(t-lastTime)/1000||0);lastTime=t;update(dt);draw();requestAnimationFrame(loop)}
+
+ function loop(t){
+   const dt=Math.min(.04,(t-lastTime)/1000||0);
+   lastTime=t;
+   update(dt);
+   draw();
+   requestAnimationFrame(loop);
+ }
+
  startBtn.addEventListener('click',startGame);
+
  window.addEventListener('keydown',e=>{
    if(['ArrowLeft','ArrowRight',' ','Spacebar'].includes(e.key))e.preventDefault();
    keys[e.key]=true;
+
    if((e.code==='Space'||e.key===' ')&&state!=='playing')startGame();
  });
+
  window.addEventListener('keyup',e=>keys[e.key]=false);
+
  let dragging=false;
- canvas.addEventListener('pointerdown',e=>{dragging=true;canvas.setPointerCapture(e.pointerId);setPointer(e)});
- canvas.addEventListener('pointermove',e=>{if(dragging)setPointer(e)});
+
+ canvas.addEventListener('pointerdown',e=>{
+   dragging=true;
+   canvas.setPointerCapture(e.pointerId);
+   setPointer(e);
+ });
+
+ canvas.addEventListener('pointermove',e=>{
+   if(dragging)setPointer(e);
+ });
+
  canvas.addEventListener('pointerup',()=>dragging=false);
  canvas.addEventListener('pointercancel',()=>dragging=false);
- function setPointer(e){const r=canvas.getBoundingClientRect();const x=(e.clientX-r.left)/r.width;target=Math.max(-.88,Math.min(.88,(x-.5)*2))}
- draw();requestAnimationFrame(loop);
+
+ function setPointer(e){
+   const r=canvas.getBoundingClientRect();
+   const x=(e.clientX-r.left)/r.width;
+   target=Math.max(-.88,Math.min(.88,(x-.5)*2));
+ }
+
+ draw();
+ requestAnimationFrame(loop);
 })();
 </script>
 </body>
+</html>
 </html>
